@@ -1,0 +1,14 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: efs-sc-nextcloud
+provisioner: efs.csi.aws.com
+parameters:
+  provisioningMode: efs-ap
+  fileSystemId: fs-0f69c7b8e5e4d2da5
+  uid: "33"
+  gid: "33"
+  directoryPerms: "700"
+  basePath: "/nextcloud"
+mountOptions:
+  - tls

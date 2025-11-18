@@ -1,0 +1,168 @@
+# Nextcloud con S3 usando IRSA correctamente
+
+replicaCount: 1
+
+# IMPORTANTE: Configurar correctamente el Service Account
+serviceAccount:
+  create: false  # No crear uno nuevo
+  name: nextcloud-sa  # Usar el existente
+  annotations: {}  # No sobrescribir anotaciones
+
+image:
+  repository: nextcloud
+  tag: 32.0.1-apache
+  pullPolicy: IfNotPresent
+
+# Security context para usar el SA correctamente
+podSecurityContext: {}
+securityContext: {}
+
+nextcloud:
+  host: nubed2.tecnicos.org.ar
+  username: admin
+  password: Admin2024Nextcloud!
+  
+  phpConfigs:
+    uploadLimit.ini: |
+      upload_max_filesize = 16G
+      post_max_size = 16G
+      max_input_time = 3600
+      max_execution_time = 3600
+    memory.ini: |
+      memory_limit = 1024M
+    opcache.ini: |
+      opcache.enable=1
+      opcache.interned_strings_buffer=32
+      opcache.max_accelerated_files=10000
+      opcache.memory_consumption=256
+      opcache.save_comments=1
+      opcache.revalidate_freq=1
+  
+  configs:
+    custom.config.php: |-
+      <?php
+      $CONFIG = array (
+        'trusted_proxies' => array(0 => '10.0.0.0/8'),
+        'trusted_domains' => array(0 => 'nubed2.tecnicos.org.ar'),
+        'forwarded_for_headers' => array('HTTP_X_FORWARDED_FOR'),
+        'overwriteprotocol' => 'https',
+        'overwrite.cli.url' => 'https://nubed2.tecnicos.org.ar',
+        
+        // S3 con IRSA (sin credenciales hardcodeadas)
+        'objectstore' => array(
+          'class' => '\\OC\\Files\\ObjectStore\\S3',
+          'arguments' => array(
+            'bucket' => 'nextcloud-colegio-staging-data',
+            'region' => 'us-east-2',
+            'use_ssl' => true,
+            'use_path_style' => false,
+            'autocreate' => true,
+          ),
+        ),
+        
+        'default_phone_region' => 'AR',
+        'memcache.local' => '\\OC\\Memcache\\APCu',
+        'memcache.distributed' => '\\OC\\Memcache\\Redis',
+        'memcache.locking' => '\\OC\\Memcache\\Redis',
+        'redis' => array('host' => 'nextcloud-redis-master', 'port' => 6379),
+        'loglevel' => 2,
+      );
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "16g"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+  tls:
+    - secretName: nextcloud-tls
+      hosts:
+        - nubed2.tecnicos.org.ar
+
+service:
+  type: ClusterIP
+  port: 8080
+
+persistence:
+  enabled: true
+  storageClass: "gp2"
+  size: 20Gi
+
+resources:
+  requests:
+    cpu: 1000m
+    memory: 2Gi
+  limits:
+    cpu: 3000m
+    memory: 4Gi
+
+internalDatabase:
+  enabled: false
+
+externalDatabase:
+  enabled: true
+  type: postgresql
+  host: nextcloud-postgresql
+  database: nextcloud
+  user: nextcloud
+  password: PostgreSQL2024Secure!
+
+postgresql:
+  enabled: true
+  auth:
+    database: nextcloud
+    username: nextcloud
+    password: PostgreSQL2024Secure!
+  primary:
+    persistence:
+      enabled: true
+      storageClass: "gp2"
+      size: 50Gi
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: false
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+cronjob:
+  enabled: true
+  schedule: "*/5 * * * *"
+
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 180
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 180
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 3
+
+strategy:
+  type: Recreate

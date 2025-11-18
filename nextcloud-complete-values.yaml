@@ -1,0 +1,287 @@
+## ============================================================================
+## NEXTCLOUD + COLLABORA + CLAMAV - Production Configuration
+## Para 80 usuarios en AWS EKS con S3 + EBS
+## ============================================================================
+
+## ============================================================================
+## CONFIGURACIÓN DE NEXTCLOUD
+## ============================================================================
+
+## Service Account con IRSA para acceso a S3
+serviceAccount:
+  create: false  # No crear uno nuevo
+  name: nextcloud-sa  # Usar el existente con IRSA
+  annotations: {}  # No sobrescribir anotaciones
+
+## Security context
+podSecurityContext: {}
+securityContext: {}
+
+## Imagen de Nextcloud
+image:
+  repository: nextcloud
+  tag: 32.0.1-apache
+  pullPolicy: IfNotPresent
+
+## Ingress para acceso externo
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "16g"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  tls:
+    - secretName: nextcloud-tls
+      hosts:
+        - nubed2.tecnicos.org.ar
+  hosts:
+    - host: nubed2.tecnicos.org.ar
+      paths:
+        - path: /
+          pathType: Prefix
+
+## Servicio
+service:
+  type: ClusterIP
+  port: 8080
+
+## Usuario administrador inicial
+nextcloud:
+  host: nubed2.tecnicos.org.ar
+  username: admin
+  password: "Admin2024Nextcloud!"
+  
+  ## Configuración de PHP
+  phpConfigs:
+    uploadLimit.ini: |
+      upload_max_filesize = 16G
+      post_max_size = 16G
+      max_input_time = 3600
+      max_execution_time = 3600
+    memory.ini: |
+      memory_limit = 1024M
+    opcache.ini: |
+      opcache.enable=1
+      opcache.interned_strings_buffer=32
+      opcache.max_accelerated_files=10000
+      opcache.memory_consumption=256
+      opcache.save_comments=1
+      opcache.revalidate_freq=1
+  
+  ## Configuraciones de Nextcloud
+  configs:
+    custom.config.php: |-
+      <?php
+      $CONFIG = array (
+        'trusted_proxies' => array(0 => '10.0.0.0/8'),
+        'trusted_domains' => array(0 => 'nubed2.tecnicos.org.ar'),
+        'forwarded_for_headers' => array('HTTP_X_FORWARDED_FOR'),
+        'overwriteprotocol' => 'https',
+        'overwrite.cli.url' => 'https://nubed2.tecnicos.org.ar',
+        
+        // S3 con IRSA (sin credenciales hardcodeadas)
+        'objectstore' => array(
+          'class' => '\\OC\\Files\\ObjectStore\\S3',
+          'arguments' => array(
+            'bucket' => 'nextcloud-colegio-staging-data',
+            'region' => 'us-east-2',
+            'use_ssl' => true,
+            'use_path_style' => false,
+            'autocreate' => true,
+          ),
+        ),
+        
+        'default_phone_region' => 'AR',
+        'memcache.local' => '\\OC\\Memcache\\APCu',
+        'memcache.distributed' => '\\OC\\Memcache\\Redis',
+        'memcache.locking' => '\\OC\\Memcache\\Redis',
+        'redis' => array(
+          'host' => 'nextcloud-redis-master',
+          'port' => 6379,
+        ),
+        'loglevel' => 2,
+        'log_type' => 'file',
+        'logfile' => '/var/www/html/data/nextcloud.log',
+        'logtimezone' => 'America/Argentina/Buenos_Aires',
+        'trashbin_retention_obligation' => 'auto, 30',
+        
+        // Previews habilitados
+        'enabledPreviewProviders' => array (
+          'OC\\Preview\\PNG',
+          'OC\\Preview\\JPEG',
+          'OC\\Preview\\GIF',
+          'OC\\Preview\\BMP',
+          'OC\\Preview\\XBitmap',
+          'OC\\Preview\\Movie',
+          'OC\\Preview\\PDF',
+          'OC\\Preview\\MP3',
+          'OC\\Preview\\TXT',
+          'OC\\Preview\\MarkDown',
+        ),
+      );
+    
+    ## Configuración de Collabora
+    collabora.config.php: |-
+      <?php
+      $CONFIG = array (
+        'richdocuments' => array (
+          'wopi_url' => 'https://collabora.tecnicos.org.ar',
+        ),
+      );
+    
+    ## Configuración de ClamAV
+    antivirus.config.php: |-
+      <?php
+      $CONFIG = array (
+        'av_mode' => 'daemon',
+        'av_host' => 'clamav-service',
+        'av_port' => 3310,
+        'av_stream_max_length' => 104857600,
+        'av_max_file_size' => 104857600,
+        'av_infected_action' => 'delete',
+      );
+
+
+## Réplicas (1 porque usa Recreate strategy con EBS)
+replicaCount: 1
+
+## Recursos computacionales
+resources:
+  requests:
+    cpu: 1000m
+    memory: 2Gi
+  limits:
+    cpu: 3000m
+    memory: 4Gi
+
+## Almacenamiento persistente (EBS gp2)
+persistence:
+  enabled: true
+  storageClass: "gp2"
+  size: 20Gi
+
+## ============================================================================
+## POSTGRESQL - Base de datos
+## ============================================================================
+
+internalDatabase:
+  enabled: false
+
+externalDatabase:
+  enabled: true
+  type: postgresql
+  host: nextcloud-postgresql
+  database: nextcloud
+  user: nextcloud
+  password: PostgreSQL2024Secure!
+
+postgresql:
+  enabled: true
+  auth:
+    username: nextcloud
+    password: "PostgreSQL2024Secure!"
+    database: nextcloud
+  
+  ## Configuración del nodo primario
+  primary:
+    persistence:
+      enabled: true
+      storageClass: "gp2"
+      size: 50Gi
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+
+## ============================================================================
+## REDIS - Caché y File Locking
+## ============================================================================
+
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: false
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+## ============================================================================
+## CRONJOB - Tareas de mantenimiento
+## ============================================================================
+
+cronjob:
+  enabled: true
+  schedule: "*/5 * * * *"
+
+## ============================================================================
+## HEALTH CHECKS
+## ============================================================================
+
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 180
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 3
+  successThreshold: 1
+
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 180
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 3
+  successThreshold: 1
+
+## ============================================================================
+## ESTRATEGIA DE ACTUALIZACIÓN
+## ============================================================================
+
+strategy:
+  type: Recreate  # Necesario cuando se usa EBS (ReadWriteOnce)
+
+## ============================================================================
+## APPS ADICIONALES A INSTALAR
+## ============================================================================
+
+lifecycle:
+  postStartCommand:
+    - "sh"
+    - "-c"
+    - |
+      # Esperar a que Nextcloud esté listo
+      until php occ status; do sleep 5; done
+      
+      # Instalar y habilitar apps necesarias
+      php occ app:install richdocuments || true
+      php occ app:enable richdocuments
+      
+      php occ app:install files_antivirus || true
+      php occ app:enable files_antivirus
+      
+      # Configurar Collabora
+      php occ config:app:set richdocuments wopi_url --value="https://collabora.tudominio.com"
+      
+      # Configurar ClamAV
+      php occ config:app:set files_antivirus av_mode --value="daemon"
+      php occ config:app:set files_antivirus av_host --value="clamav-service"
+      php occ config:app:set files_antivirus av_port --value="3310"
+      
+      echo "Apps instaladas y configuradas correctamente"
