@@ -36,6 +36,10 @@ ingress:
     nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    nginx.ingress.kubernetes.io/client-body-buffer-size: "128k"
+    nginx.ingress.kubernetes.io/client-body-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
   tls:
     - secretName: nextcloud-tls
       hosts:
@@ -96,7 +100,7 @@ nextcloud:
             'autocreate' => true,
           ),
         ),
-        
+        'app.files.max_chunk_size' => 104857600,
         'default_phone_region' => 'AR',
         'memcache.local' => '\\OC\\Memcache\\APCu',
         'memcache.distributed' => '\\OC\\Memcache\\Redis',
@@ -132,6 +136,8 @@ nextcloud:
       $CONFIG = array (
         'richdocuments' => array (
           'wopi_url' => 'https://collabora.tecnicos.org.ar',
+          'wopi_allowlist' => '10.0.0.0/8,172.31.0.0/16,127.0.0.1/32',
+          'disable_certificate_verification' => false,
         ),
       );
     
