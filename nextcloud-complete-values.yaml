@@ -98,6 +98,7 @@ nextcloud:
             'use_ssl' => true,
             'use_path_style' => false,
             'autocreate' => true,
+            'endpoint' => 'https://nextcloud-colegio-staging-data.s3-accelerate.amazonaws.com',
           ),
         ),
         'app.files.max_chunk_size' => 104857600,
